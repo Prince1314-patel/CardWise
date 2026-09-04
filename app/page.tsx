@@ -11,6 +11,8 @@ import {
   CreditCard,
   ExternalLink,
   LineChart,
+  LogIn,
+  LogOut,
   MoreHorizontal,
   RefreshCw,
   Search,
@@ -76,6 +78,11 @@ export default function Home() {
   const [isWalletOpen, setIsWalletOpen] = useState(false);
   const [isAddCardOpen, setIsAddCardOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [authForm, setAuthForm] = useState({ email: "", password: "" });
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [user, setUser] = useState<{ email: string; displayName: string | null } | null>(null);
   const [isSavingCard, setIsSavingCard] = useState(false);
   const [cardForm, setCardForm] = useState({
     issuer: "",
@@ -102,15 +109,36 @@ export default function Home() {
   const alternatives = recommendations.slice(1);
   const winnerCap = winner?.breakdown.find((item) => item.capApplied !== null);
 
+  async function apiFetch(path: string, init?: RequestInit) {
+    const response = await fetch(path, init);
+    if (response.status !== 401 || path.startsWith("/api/auth/")) return response;
+    const refreshed = await fetch("/api/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json" } });
+    return refreshed.ok ? fetch(path, init) : response;
+  }
+
+  function openCardForm() {
+    if (!user) {
+      setAuthMode("sign-in");
+      setIsAuthOpen(true);
+      return;
+    }
+    setIsAddCardOpen(true);
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function loadWallet() {
       try {
-        const response = await fetch("/api/cards", { headers: { Accept: "application/json" } });
+        const session = await apiFetch("/api/auth/me", { headers: { Accept: "application/json" } });
+        if (!session.ok) return;
+        const sessionPayload = await session.json() as { user?: { email: string; displayName: string | null } };
+        if (!sessionPayload.user) return;
+        const response = await apiFetch("/api/cards", { headers: { Accept: "application/json" } });
         if (!response.ok) return;
         const payload = await response.json() as { cards?: WalletCard[] };
-        if (!cancelled && payload.cards && payload.cards.length) {
-          setWallet(payload.cards);
+        if (!cancelled) {
+          setUser(sessionPayload.user);
+          setWallet(payload.cards ?? []);
           setIsPreviewWallet(false);
           setRemoteRecommendationResult(null);
         }
@@ -127,7 +155,7 @@ export default function Home() {
     setNotice(null);
     try {
       if (!isPreviewWallet) {
-        const response = await fetch("/api/recommend", {
+        const response = await apiFetch("/api/recommend", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ merchant, amount: numericAmount, category, channel }),
@@ -154,7 +182,7 @@ export default function Home() {
     if (baseRate > 0) rules.push({ label: "Base rewards", rate: baseRate, confidence: "medium", source: "User-entered rule" });
     if (categoryRate > 0) rules.push({ label: `${categoryOptions.find((item) => item.value === category)?.label ?? "Category"} rewards`, rate: categoryRate, cap: cardForm.cap ? Number(cardForm.cap) : undefined, capPeriod: cardForm.cap ? "monthly" : undefined, categories: [category], confidence: "medium", source: "User-entered rule" });
     try {
-      const response = await fetch("/api/cards", {
+      const response = await apiFetch("/api/cards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -185,7 +213,7 @@ export default function Home() {
     if (isPreviewWallet) return;
     setNotice(null);
     try {
-      const response = await fetch(`/api/cards/${cardId}`, { method: "DELETE" });
+      const response = await apiFetch(`/api/cards/${cardId}`, { method: "DELETE" });
       if (!response.ok) {
         const payload = await response.json() as { error?: { message?: string } };
         throw new Error(payload.error?.message ?? "Your card could not be removed.");
@@ -195,6 +223,62 @@ export default function Home() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Your card could not be removed.");
     }
+  }
+
+  async function submitEmailAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsAuthenticating(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/auth/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: authMode, ...authForm }),
+      });
+      const payload = await response.json() as { status?: string; error?: { message?: string } };
+      if (!response.ok) throw new Error(payload.error?.message ?? "We could not complete sign-in.");
+      if (payload.status === "verification-required") {
+        setNotice("Check your inbox to verify your email, then sign in.");
+        setAuthMode("sign-in");
+        return;
+      }
+      const session = await apiFetch("/api/auth/me", { headers: { Accept: "application/json" } });
+      const sessionPayload = await session.json() as { user?: { email: string; displayName: string | null } };
+      if (!session.ok || !sessionPayload.user) throw new Error("Sign-in succeeded but the session could not be verified.");
+      setUser(sessionPayload.user);
+      setWallet([]);
+      setIsPreviewWallet(false);
+      setIsAuthOpen(false);
+      setAuthForm({ email: "", password: "" });
+      setNotice("You are signed in. Add your cards to build your private wallet.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "We could not complete sign-in.");
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }
+
+  async function startGoogleAuth() {
+    setIsAuthenticating(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/auth/google", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ returnTo: "/" }) });
+      const payload = await response.json() as { url?: string; error?: { message?: string } };
+      if (!response.ok || !payload.url) throw new Error(payload.error?.message ?? "Google sign-in is unavailable.");
+      window.location.assign(payload.url);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Google sign-in is unavailable.");
+      setIsAuthenticating(false);
+    }
+  }
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" } });
+    setUser(null);
+    setWallet(demoWallet);
+    setIsPreviewWallet(true);
+    setRemoteRecommendationResult(null);
+    setNotice("You have been signed out. Your preview wallet is not saved.");
   }
 
   return (
@@ -224,13 +308,13 @@ export default function Home() {
         <header className="flex h-[72px] items-center justify-between border-b border-[#e6eaf0] bg-white px-5 sm:px-8">
           <div className="flex items-center gap-3 lg:hidden"><div className="grid h-9 w-9 place-items-center rounded-lg bg-[#172a5b]"><CreditCard className="h-4 w-4 text-[#f6c759]" /></div><span className="font-bold tracking-[-0.05em]">CardWise</span></div>
           <div className="hidden items-center gap-2 text-sm text-[#70809b] lg:flex"><span className="font-medium text-[#33415c]">Personal finance</span><ChevronRight className="h-4 w-4" /><span>Recommendations</span></div>
-          <div className="flex items-center gap-2 sm:gap-4"><button onClick={() => setIsHelpOpen(true)} className="hidden items-center gap-2 rounded-lg border border-[#e0e5ed] px-3 py-2 text-sm font-semibold text-[#40516f] sm:flex"><CircleHelp className="h-4 w-4" /> Help</button><span aria-label="Your CardWise profile" className="grid h-9 w-9 place-items-center rounded-full bg-[#e6ecfc] text-xs font-bold text-[#1f3e92]">PP</span></div>
+          <div className="flex items-center gap-2 sm:gap-4"><button onClick={() => setIsHelpOpen(true)} className="hidden items-center gap-2 rounded-lg border border-[#e0e5ed] px-3 py-2 text-sm font-semibold text-[#40516f] sm:flex"><CircleHelp className="h-4 w-4" /> Help</button>{user ? <button onClick={() => void signOut()} className="inline-flex items-center gap-2 rounded-lg border border-[#e0e5ed] px-3 py-2 text-xs font-bold text-[#40516f]" title={user.email}><LogOut className="h-4 w-4" /> Sign out</button> : <button onClick={() => { setAuthMode("sign-in"); setIsAuthOpen(true); }} className="inline-flex items-center gap-2 rounded-lg bg-[#1b377d] px-3 py-2 text-xs font-bold text-white"><LogIn className="h-4 w-4" /> Sign in</button>}</div>
         </header>
 
         <div className="mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:py-10">
           <section className="flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
             <div>
-              <div className="mb-3 flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5 rounded-full bg-[#eaf7f1] px-2.5 py-1 text-xs font-semibold text-[#187a4d]"><span className="h-1.5 w-1.5 rounded-full bg-[#22a56a]" /> {isPreviewWallet ? "Wallet preview ready" : "Secure wallet connected"}</span>{isPreviewWallet && <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-600/10">Preview data</span>}<button onClick={() => setIsAddCardOpen(true)} className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold text-[#4262ad] hover:bg-[#edf2ff]"><Plus className="h-3.5 w-3.5" /> Add a card</button></div>
+              <div className="mb-3 flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5 rounded-full bg-[#eaf7f1] px-2.5 py-1 text-xs font-semibold text-[#187a4d]"><span className="h-1.5 w-1.5 rounded-full bg-[#22a56a]" /> {isPreviewWallet ? "Wallet preview ready" : "Secure wallet connected"}</span>{isPreviewWallet && <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-600/10">Preview data</span>}<button onClick={openCardForm} className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold text-[#4262ad] hover:bg-[#edf2ff]"><Plus className="h-3.5 w-3.5" /> Add a card</button></div>
               <h1 className="text-3xl font-bold tracking-[-0.045em] text-[#14213d] sm:text-[2.1rem]">Which card should I use?</h1>
               <p className="mt-2 max-w-xl text-[15px] leading-6 text-[#64748b]">Tell us what you are buying. We compare benefits, limits, and fresh evidence from the cards you already own.</p>
             </div>
@@ -252,7 +336,7 @@ export default function Home() {
           <div className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1fr)_320px]">
             <section aria-live="polite">
               <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-bold uppercase tracking-[0.12em] text-[#718099]">Your recommendation</h2><span className="text-xs text-[#8290a8]">For {merchant || "this purchase"} · {formatRupees(numericAmount)}</span></div>
-              {winner ? <article className="overflow-hidden rounded-[22px] bg-[#142d69] text-white shadow-[0_18px_45px_rgba(20,45,105,0.20)]" id="wallet"><div className="relative overflow-hidden p-6 sm:p-7"><div className="pointer-events-none absolute right-0 top-0 h-52 w-52 -translate-y-16 translate-x-16 rounded-full border-[28px] border-[#38569c] opacity-50" /><div className="pointer-events-none absolute bottom-[-110px] right-36 h-56 w-56 rounded-full bg-[#244589] blur-3xl" /><div className="relative flex flex-col justify-between gap-7 sm:flex-row sm:items-start"><div><span className="inline-flex rounded-full bg-[#f6c759] px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] text-[#4d3900]">Best for this purchase</span><h3 className="mt-4 text-2xl font-bold tracking-[-0.035em] sm:text-[1.7rem]">Use your {winner.card.name}</h3><p className="mt-2 max-w-lg text-sm leading-6 text-[#c9d5f1]">{winner.reason} It gives the strongest verified value from your current wallet.</p></div><div className="min-w-[154px] rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm"><p className="text-[11px] font-bold uppercase tracking-[0.11em] text-[#b8c8ec]">Estimated benefit</p><p className="mt-1 text-[2rem] font-bold tracking-[-0.05em] text-white">{formatRupees(winner.totalValue)}</p><p className="text-xs font-semibold text-[#b8c8ec]">{winner.effectiveRate.toFixed(1)}% effective return</p></div></div><div className="relative mt-7 grid gap-3 border-t border-white/12 pt-5 sm:grid-cols-3"><div className="flex items-center gap-2.5 text-sm"><BadgeCheck className="h-4.5 w-4.5 text-[#71d9a1]" /><span><strong>{winner.daysToDue} days</strong> until payment due</span></div><div className="flex items-center gap-2.5 text-sm"><CalendarDays className="h-4.5 w-4.5 text-[#a7c6ff]" /><span>{winnerCap ? <><strong>{formatRupees(winnerCap.capApplied ?? 0)}</strong> remaining cap</> : "No verified cap applies"}</span></div><button onClick={() => setExpandedCard(expandedCard === winner.card.id ? null : winner.card.id)} className="flex items-center gap-2.5 text-left text-sm font-semibold text-[#f6c759]">Why this card? <ChevronRight className={`h-4 w-4 transition ${expandedCard === winner.card.id ? "rotate-90" : ""}`} /></button></div>{expandedCard === winner.card.id && <div className="relative mt-5 rounded-xl bg-[#0e2458] p-4 text-sm text-[#d8e2f8]">We calculate every applicable rule independently, then apply remaining caps. Reward points are converted to rupees only when their value is verified.</div>}</div></article> : <div className="rounded-2xl border border-dashed border-[#cad5e5] bg-white p-8 text-center"><WalletCards className="mx-auto h-8 w-8 text-[#7185aa]" /><h3 className="mt-3 font-bold text-[#243552]">Add your first card to get a recommendation</h3><p className="mt-1 text-sm text-[#718099]">Only the cards you add are evaluated.</p><button onClick={() => setIsAddCardOpen(true)} className="mt-4 rounded-lg bg-[#1b377d] px-4 py-2 text-sm font-bold text-white">Add a card</button></div>}
+              {winner ? <article className="overflow-hidden rounded-[22px] bg-[#142d69] text-white shadow-[0_18px_45px_rgba(20,45,105,0.20)]" id="wallet"><div className="relative overflow-hidden p-6 sm:p-7"><div className="pointer-events-none absolute right-0 top-0 h-52 w-52 -translate-y-16 translate-x-16 rounded-full border-[28px] border-[#38569c] opacity-50" /><div className="pointer-events-none absolute bottom-[-110px] right-36 h-56 w-56 rounded-full bg-[#244589] blur-3xl" /><div className="relative flex flex-col justify-between gap-7 sm:flex-row sm:items-start"><div><span className="inline-flex rounded-full bg-[#f6c759] px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] text-[#4d3900]">Best for this purchase</span><h3 className="mt-4 text-2xl font-bold tracking-[-0.035em] sm:text-[1.7rem]">Use your {winner.card.name}</h3><p className="mt-2 max-w-lg text-sm leading-6 text-[#c9d5f1]">{winner.reason} It gives the strongest verified value from your current wallet.</p></div><div className="min-w-[154px] rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm"><p className="text-[11px] font-bold uppercase tracking-[0.11em] text-[#b8c8ec]">Estimated benefit</p><p className="mt-1 text-[2rem] font-bold tracking-[-0.05em] text-white">{formatRupees(winner.totalValue)}</p><p className="text-xs font-semibold text-[#b8c8ec]">{winner.effectiveRate.toFixed(1)}% effective return</p></div></div><div className="relative mt-7 grid gap-3 border-t border-white/12 pt-5 sm:grid-cols-3"><div className="flex items-center gap-2.5 text-sm"><BadgeCheck className="h-4.5 w-4.5 text-[#71d9a1]" /><span><strong>{winner.daysToDue} days</strong> until payment due</span></div><div className="flex items-center gap-2.5 text-sm"><CalendarDays className="h-4.5 w-4.5 text-[#a7c6ff]" /><span>{winnerCap ? <><strong>{formatRupees(winnerCap.capApplied ?? 0)}</strong> remaining cap</> : "No verified cap applies"}</span></div><button onClick={() => setExpandedCard(expandedCard === winner.card.id ? null : winner.card.id)} className="flex items-center gap-2.5 text-left text-sm font-semibold text-[#f6c759]">Why this card? <ChevronRight className={`h-4 w-4 transition ${expandedCard === winner.card.id ? "rotate-90" : ""}`} /></button></div>{expandedCard === winner.card.id && <div className="relative mt-5 rounded-xl bg-[#0e2458] p-4 text-sm text-[#d8e2f8]">We calculate every applicable rule independently, then apply caps. Reward points are converted to rupees only when their value is verified.</div>}</div></article> : <div className="rounded-2xl border border-dashed border-[#cad5e5] bg-white p-8 text-center"><WalletCards className="mx-auto h-8 w-8 text-[#7185aa]" /><h3 className="mt-3 font-bold text-[#243552]">Add your first card to get a recommendation</h3><p className="mt-1 text-sm text-[#718099]">Only the cards you add are evaluated.</p><button onClick={openCardForm} className="mt-4 rounded-lg bg-[#1b377d] px-4 py-2 text-sm font-bold text-white">Add a card</button></div>}
 
               <div className="mt-7"><div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-bold uppercase tracking-[0.12em] text-[#718099]">Alternatives</h2><button onClick={() => setExpandedCard(alternatives[0]?.card.id ?? null)} className="text-xs font-bold text-[#4563ad]">Compare all <ArrowRight className="ml-1 inline h-3.5 w-3.5" /></button></div><div className="space-y-3">{alternatives.map((recommendation, index) => <article key={recommendation.card.id} className="rounded-2xl border border-[#e1e7ee] bg-white p-4 transition hover:border-[#cfd8e7] hover:shadow-[0_10px_24px_rgba(23,42,91,0.05)] sm:flex sm:items-center sm:gap-4 sm:p-5"><div className="flex flex-1 items-center gap-3.5"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#eef2f8] text-xs font-bold text-[#63708a]">#{index + 2}</span><div className="grid h-11 w-[66px] shrink-0 place-items-center rounded-lg shadow-sm" style={{ background: `linear-gradient(135deg, ${recommendation.card.accent}, #243a77)` }}><CreditCard className="h-5 w-5 text-white/85" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-[#1c2b48]">{recommendation.card.name}</h3><span className="text-xs text-[#8490a5]">•{recommendation.card.lastFour}</span></div><p className="mt-0.5 truncate text-xs text-[#70809a]">{recommendation.reason}</p></div></div><div className="mt-4 flex items-center justify-between gap-4 border-t border-[#edf0f4] pt-3 sm:mt-0 sm:border-0 sm:pt-0"><ConfidenceBadge level={recommendation.confidence} /><div className="text-right"><p className="text-lg font-bold tracking-[-0.03em] text-[#1b377d]">{formatRupees(recommendation.totalValue)}</p><p className="text-[11px] font-semibold text-[#8290a8]">{recommendation.effectiveRate.toFixed(1)}% return</p></div><button onClick={() => setExpandedCard(expandedCard === recommendation.card.id ? null : recommendation.card.id)} className="grid h-8 w-8 place-items-center rounded-lg text-[#61728d] hover:bg-[#f1f4f8]" aria-label={`View ${recommendation.card.name} calculation`}><MoreHorizontal className="h-5 w-5" /></button></div>{expandedCard === recommendation.card.id && <div className="mt-4 w-full rounded-xl bg-[#f6f8fb] p-3 text-xs leading-5 text-[#65738a] sm:ml-12">{recommendation.breakdown.map((item) => <p key={item.rule.id}>{item.rule.label}: {formatRupees(item.finalValue)} · {item.note}</p>)}</div>}</article>)}</div></div>
             </section>
@@ -265,6 +349,25 @@ export default function Home() {
         </div>
       </div>
 
+      <Dialog open={isAuthOpen} onOpenChange={setIsAuthOpen}>
+        <DialogContent className="max-w-md border-[#dce3ec] bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-[#1c2b48]">{authMode === "sign-in" ? "Sign in to CardWise" : "Create your CardWise account"}</DialogTitle>
+            <DialogDescription>Your saved wallet is private to your account. We never request card numbers, CVV, PIN, or OTP.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <Button type="button" variant="outline" disabled={isAuthenticating} onClick={() => void startGoogleAuth()} className="h-11 border-[#dce3ec] text-[#304362]">Continue with Google</Button>
+            <div className="flex items-center gap-3 text-xs text-[#91a0b6]"><span className="h-px flex-1 bg-[#e6eaf0]" />or use email<span className="h-px flex-1 bg-[#e6eaf0]" /></div>
+            <form onSubmit={submitEmailAuth} className="grid gap-3">
+              <label className="grid gap-1.5 text-sm font-semibold text-[#40516a]">Email<Input required type="email" autoComplete="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label>
+              <label className="grid gap-1.5 text-sm font-semibold text-[#40516a]">Password<Input required type="password" minLength={12} maxLength={128} autoComplete={authMode === "sign-in" ? "current-password" : "new-password"} value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="12+ characters, upper/lowercase and number" /></label>
+              <Button type="submit" disabled={isAuthenticating} className="mt-1 h-11">{isAuthenticating ? "Please wait…" : authMode === "sign-in" ? "Sign in securely" : "Create account"}</Button>
+            </form>
+            <button type="button" disabled={isAuthenticating} onClick={() => setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in")} className="text-center text-xs font-bold text-[#4563ad]">{authMode === "sign-in" ? "New to CardWise? Create an account" : "Already have an account? Sign in"}</button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isWalletOpen} onOpenChange={setIsWalletOpen}>
         <DialogContent className="max-w-2xl border-[#dce3ec] bg-white p-0">
           <DialogHeader className="border-b border-[#e8edf3] px-6 py-5">
@@ -275,7 +378,7 @@ export default function Home() {
             {isPreviewWallet && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">You are viewing a safe preview wallet. Add a card to start a private saved wallet.</div>}
             {wallet.map((card) => <div key={card.id} className="flex items-center gap-3 rounded-xl border border-[#e2e8f0] p-3.5"><div className="grid h-10 w-14 place-items-center rounded-lg" style={{ background: `linear-gradient(135deg, ${card.accent}, #243a77)` }}><CreditCard className="h-5 w-5 text-white/85" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-[#243552]">{card.name} <span className="font-medium text-[#7b8aa1]">•{card.lastFour || "----"}</span></p><p className="mt-0.5 text-xs text-[#718099]">{card.issuer} · Statement {card.statementDay} · Due {card.dueDay}</p><p className="mt-1 text-xs font-medium text-[#4563ad]">{card.rules.length} saved reward rule{card.rules.length === 1 ? "" : "s"}</p></div>{!isPreviewWallet && <button onClick={() => void removeCard(card.id)} className="rounded-lg p-2 text-[#a04a4a] transition hover:bg-rose-50" aria-label={`Remove ${card.name}`}><Trash2 className="h-4 w-4" /></button>}</div>)}
           </div>
-          <DialogFooter className="border-t border-[#e8edf3] px-6 py-4"><Button variant="outline" onClick={() => setIsWalletOpen(false)}>Close</Button><Button onClick={() => { setIsWalletOpen(false); setIsAddCardOpen(true); }}><Plus /> Add a card</Button></DialogFooter>
+          <DialogFooter className="border-t border-[#e8edf3] px-6 py-4"><Button variant="outline" onClick={() => setIsWalletOpen(false)}>Close</Button><Button onClick={() => { setIsWalletOpen(false); openCardForm(); }}><Plus /> Add a card</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
