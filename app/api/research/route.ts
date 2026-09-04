@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = requireUserIdentity(request.headers);
+    const user = await requireUserIdentity(request.headers);
     await ensureUser(user);
     const input = await readJson(request, researchInputSchema);
     const card = (await listCards(user.id)).find((item) => item.id === input.cardId);

@@ -12,7 +12,7 @@ const idSchema = z.string().uuid();
 export async function DELETE(request: Request, context: { params: Promise<{ cardId: string }> }) {
   try {
     assertSameOrigin(request);
-    const user = requireUserIdentity(request.headers);
+    const user = await requireUserIdentity(request.headers);
     const { cardId } = await context.params;
     if (!idSchema.safeParse(cardId).success) throw new ApiError(400, "INVALID_CARD_ID", "The card ID is invalid.");
     await ensureUser(user);

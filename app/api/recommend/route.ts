@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = requireUserIdentity(request.headers);
+    const user = await requireUserIdentity(request.headers);
     await ensureUser(user);
     const purchase = await readJson(request, recommendationInputSchema);
     const cards = await listCards(user.id);

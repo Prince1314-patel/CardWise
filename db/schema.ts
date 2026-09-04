@@ -74,3 +74,13 @@ export const researchRateWindows = sqliteTable(
   },
   (table) => [uniqueIndex("research_rate_windows_user_window_idx").on(table.userId, table.windowStart)],
 );
+
+export const authRateWindows = sqliteTable(
+  "auth_rate_windows",
+  {
+    fingerprint: text("fingerprint").notNull(),
+    windowStart: integer("window_start").notNull(),
+    requestCount: integer("request_count").notNull().default(0),
+  },
+  (table) => [uniqueIndex("auth_rate_windows_fingerprint_window_idx").on(table.fingerprint, table.windowStart)],
+);

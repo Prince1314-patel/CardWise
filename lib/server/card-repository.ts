@@ -161,3 +161,14 @@ export async function takeResearchQuota(userId: string, maximumPerHour = 12) {
     throw new ApiError(429, "RESEARCH_LIMIT_REACHED", "You have reached the current research limit. Please try again in the next hour.");
   }
 }
+
+export async function takeAuthQuota(fingerprint: string, maximumPerWindow = 8) {
+  const db = getDatabase();
+  const windowStart = Math.floor(Date.now() / 900_000) * 900_000;
+  await db.prepare(`INSERT OR IGNORE INTO auth_rate_windows (fingerprint, window_start, request_count) VALUES (?, ?, 0)`).bind(fingerprint, windowStart).run();
+  const result = await db.prepare(`UPDATE auth_rate_windows SET request_count = request_count + 1 WHERE fingerprint = ? AND window_start = ? AND request_count < ?`)
+    .bind(fingerprint, windowStart, maximumPerWindow).run();
+  if (result.meta.changes !== 1) {
+    throw new ApiError(429, "AUTH_RATE_LIMITED", "Please wait before trying again.");
+  }
+}
