@@ -5,6 +5,7 @@ type SupabaseSettings = {
   url: string;
   publishableKey: string;
   cookieSecret: string;
+  rateLimitPepper: string;
 };
 
 function runtimeValue(name: string) {
@@ -16,7 +17,8 @@ export function getSupabaseSettings(): SupabaseSettings {
   const url = runtimeValue("SUPABASE_URL");
   const publishableKey = runtimeValue("SUPABASE_PUBLISHABLE_KEY");
   const cookieSecret = runtimeValue("CARDWISE_AUTH_COOKIE_SECRET");
-  if (!url || !publishableKey || !cookieSecret || cookieSecret.length < 32) {
+  const rateLimitPepper = runtimeValue("CARDWISE_AUTH_RATE_LIMIT_PEPPER");
+  if (!url || !publishableKey || !cookieSecret || !rateLimitPepper || cookieSecret.length < 32 || rateLimitPepper.length < 32) {
     throw new ApiError(503, "AUTH_NOT_CONFIGURED", "Sign-in is not configured yet.");
   }
 
@@ -29,7 +31,7 @@ export function getSupabaseSettings(): SupabaseSettings {
   if (parsedUrl.protocol !== "https:" || parsedUrl.pathname !== "/") {
     throw new ApiError(503, "AUTH_NOT_CONFIGURED", "Sign-in is not configured yet.");
   }
-  return { url: parsedUrl.origin, publishableKey, cookieSecret };
+  return { url: parsedUrl.origin, publishableKey, cookieSecret, rateLimitPepper };
 }
 
 export async function supabaseAuthRequest(path: string, init: RequestInit = {}) {
