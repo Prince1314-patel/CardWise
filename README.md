@@ -53,11 +53,12 @@ CardWise uses Supabase Auth for Google OAuth and email/password sign-in. Set the
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 CARDWISE_AUTH_COOKIE_SECRET=<a-random-32-plus-character-secret>
+CARDWISE_AUTH_RATE_LIMIT_PEPPER=<a-different-random-32-plus-character-secret>
 ```
 
 `SUPABASE_PUBLISHABLE_KEY` is safe to use for Supabase's public Auth API, but it remains server-side in this implementation. Do not provide a Supabase service-role key to CardWise.
 
-In Supabase Auth, enable Email and Google, register the production callback URL as `https://your-domain/api/auth/callback`, and restrict redirect URLs to your own production and local-development origins. The app uses PKCE, signed short-lived OAuth state, HTTP-only Secure session cookies, origin checks on all authentication writes, generic login failures, and D1-backed login rate limiting.
+In Supabase Auth, enable Email and Google, register the production callback URL as `https://your-domain/api/auth/callback`, and restrict redirect URLs to your own production and local-development origins. The app uses PKCE, signed short-lived OAuth state, HTTP-only Secure session cookies, origin checks on all authentication writes, generic login failures, and D1-backed login rate limiting. Generate the cookie secret and rate-limit pepper independently; neither belongs in source control.
 
 ## Verification
 
