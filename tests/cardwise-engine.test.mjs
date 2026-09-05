@@ -20,7 +20,7 @@ const vite = await createServer({
     },
     load(id) {
       if (id !== "\0test-cloudflare-workers") return null;
-      return `const statement = { bind() { return this; }, async run() { return { meta: { changes: 1 } }; } }; export const env = { SUPABASE_URL: "https://auth.example.test", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test", CARDWISE_AUTH_COOKIE_SECRET: "test-cookie-secret-that-is-more-than-thirty-two-characters", DB: { prepare() { return statement; } } };`;
+      return `const statement = { bind() { return this; }, async run() { return { meta: { changes: 1 } }; } }; export const env = { SUPABASE_URL: "https://auth.example.test", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test", CARDWISE_AUTH_COOKIE_SECRET: "test-cookie-secret-that-is-more-than-thirty-two-characters", CARDWISE_AUTH_RATE_LIMIT_PEPPER: "test-rate-limit-pepper-that-is-more-than-thirty-two-characters", DB: { prepare() { return statement; } } };`;
     },
   }],
   server: { middlewareMode: true },
@@ -203,9 +203,13 @@ test("keeps session material server-only and OAuth callbacks bound to signed PKC
 
 test("rate limits authentication without persisting raw client addresses", async () => {
   const limiter = await readFile(path.join(root, "lib/server/auth-rate-limit.ts"), "utf8");
+  const settings = await readFile(path.join(root, "lib/server/supabase.ts"), "utf8");
   const schema = await readFile(path.join(root, "db/schema.ts"), "utf8");
   assert.match(limiter, /SHA-256/);
   assert.match(limiter, /takeAuthQuota/);
+  assert.match(limiter, /rateLimitPepper/);
+  assert.doesNotMatch(limiter, /cookieSecret/);
+  assert.match(settings, /CARDWISE_AUTH_RATE_LIMIT_PEPPER/);
   assert.doesNotMatch(limiter, /INSERT.*cf-connecting-ip/i);
   assert.match(schema, /auth_rate_windows/);
 });
