@@ -13,7 +13,3 @@ export const emailAuthInputSchema = z.object({
   email,
   password,
 }).strict();
-
-export const authRedirectInputSchema = z.object({
-  returnTo: z.string().max(300).optional(),
-}).strict();

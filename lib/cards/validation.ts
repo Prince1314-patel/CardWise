@@ -49,5 +49,5 @@ export const researchInputSchema = recommendationInputSchema.extend({
   cardId: z.string().uuid(),
 });
 
-export type CardInput = z.infer<typeof cardInputSchema>;
+export type CardInput = z.output<typeof cardInputSchema>;
 export type RecommendationInput = z.infer<typeof recommendationInputSchema>;

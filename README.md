@@ -47,18 +47,17 @@ Never prefix this variable with `NEXT_PUBLIC_`, expose it in client code, or com
 
 ## Public authentication configuration
 
-CardWise uses Supabase Auth for Google OAuth and email/password sign-in. Set these server-side environment variables in the public deployment:
+CardWise uses Supabase Auth for email/password sign-in. Set these server-side environment variables in the public deployment:
 
 ```bash
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-CARDWISE_AUTH_COOKIE_SECRET=<a-random-32-plus-character-secret>
 CARDWISE_AUTH_RATE_LIMIT_PEPPER=<a-different-random-32-plus-character-secret>
 ```
 
 `SUPABASE_PUBLISHABLE_KEY` is safe to use for Supabase's public Auth API, but it remains server-side in this implementation. Do not provide a Supabase service-role key to CardWise.
 
-In Supabase Auth, enable Email and Google, register the production callback URL as `https://your-domain/api/auth/callback`, and restrict redirect URLs to your own production and local-development origins. The app uses PKCE, signed short-lived OAuth state, HTTP-only Secure session cookies, origin checks on all authentication writes, generic login failures, and D1-backed login rate limiting. Generate the cookie secret and rate-limit pepper independently; neither belongs in source control.
+In Supabase Auth, enable Email confirmation, set the Site URL to your production address, and restrict redirect URLs to your own production and local-development origins. The app uses HTTP-only Secure session cookies, origin checks on all authentication writes, generic login failures, upstream session revocation on sign-out, and D1-backed login rate limiting. Keep the rate-limit pepper out of source control.
 
 ## Verification
 

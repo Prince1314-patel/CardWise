@@ -258,20 +258,6 @@ export default function Home() {
     }
   }
 
-  async function startGoogleAuth() {
-    setIsAuthenticating(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/auth/google", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ returnTo: "/" }) });
-      const payload = await response.json() as { url?: string; error?: { message?: string } };
-      if (!response.ok || !payload.url) throw new Error(payload.error?.message ?? "Google sign-in is unavailable.");
-      window.location.assign(payload.url);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Google sign-in is unavailable.");
-      setIsAuthenticating(false);
-    }
-  }
-
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" } });
     setUser(null);
@@ -356,8 +342,6 @@ export default function Home() {
             <DialogDescription>Your saved wallet is private to your account. We never request card numbers, CVV, PIN, or OTP.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <Button type="button" variant="outline" disabled={isAuthenticating} onClick={() => void startGoogleAuth()} className="h-11 border-[#dce3ec] text-[#304362]">Continue with Google</Button>
-            <div className="flex items-center gap-3 text-xs text-[#91a0b6]"><span className="h-px flex-1 bg-[#e6eaf0]" />or use email<span className="h-px flex-1 bg-[#e6eaf0]" /></div>
             <form onSubmit={submitEmailAuth} className="grid gap-3">
               <label className="grid gap-1.5 text-sm font-semibold text-[#40516a]">Email<Input required type="email" autoComplete="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" /></label>
               <label className="grid gap-1.5 text-sm font-semibold text-[#40516a]">Password<Input required type="password" minLength={12} maxLength={128} autoComplete={authMode === "sign-in" ? "current-password" : "new-password"} value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder="12+ characters, upper/lowercase and number" /></label>

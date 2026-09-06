@@ -12,9 +12,9 @@ function toHex(bytes: Uint8Array) {
   return [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-export async function enforceAuthRateLimit(headers: Headers, maximumPerWindow = 8) {
+export async function enforceAuthRateLimit(headers: Headers, maximumPerWindow = 8, subject = "") {
   const pepper = getSupabaseSettings().rateLimitPepper;
-  const material = new TextEncoder().encode(`cardwise-auth-v1:${pepper}:${clientAddress(headers)}`);
+  const material = new TextEncoder().encode(`cardwise-auth-v1:${pepper}:${clientAddress(headers)}:${subject}`);
   const fingerprint = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", material)));
   if (fingerprint.length !== 64) throw new ApiError(503, "AUTH_UNAVAILABLE", "Sign-in is temporarily unavailable. Please try again.");
   await takeAuthQuota(fingerprint, maximumPerWindow);

@@ -7,8 +7,6 @@ import { supabaseAuthRequest } from "@/lib/server/supabase";
 
 export const dynamic = "force-dynamic";
 
-type AuthSessionResponse = { access_token?: string; refresh_token?: string; expires_in?: number };
-
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
@@ -21,9 +19,9 @@ export async function POST(request: Request) {
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
     if (!response.ok) throw new ApiError(401, "AUTH_REQUIRED", "Please sign in to continue.");
-    const session = await response.json() as AuthSessionResponse;
+    const session: unknown = await response.json();
     const result = NextResponse.json({ status: "refreshed" }, { headers: { "Cache-Control": "no-store" } });
-    setSessionCookies(result, session as Required<AuthSessionResponse>);
+    setSessionCookies(result, session);
     return result;
   } catch (error) {
     return apiErrorResponse(error);

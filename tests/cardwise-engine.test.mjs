@@ -148,7 +148,7 @@ test("never places API secrets or unsafe HTML sinks in the client page", async (
   const page = await readFile(path.join(root, "app/page.tsx"), "utf8");
   assert.doesNotMatch(page, /OPENAI_API_KEY|process\.env|dangerouslySetInnerHTML/);
   assert.match(page, /Save card securely/);
-  assert.match(page, /Continue with Google/);
+  assert.doesNotMatch(page, /Google|OAuth/);
   assert.doesNotMatch(page, /localStorage|sessionStorage/);
 });
 
@@ -189,16 +189,13 @@ test("enforces a high-entropy password policy and rejects unexpected authenticat
   assert.equal(emailAuthInputSchema.safeParse({ mode: "sign-in", email: "person@example.com", password: "StrongPassword12" }).data?.email, "person@example.com");
 });
 
-test("keeps session material server-only and OAuth callbacks bound to signed PKCE state", async () => {
+test("keeps session material server-only and validates the upstream session shape", async () => {
   const source = await readFile(path.join(root, "lib/server/auth-session.ts"), "utf8");
-  const callback = await readFile(path.join(root, "app/api/auth/callback/route.ts"), "utf8");
   assert.match(source, /httpOnly: true/);
   assert.match(source, /secure: true/);
   assert.match(source, /sameSite: "strict"/);
-  assert.match(source, /crypto\.subtle\.sign/);
-  assert.match(source, /constantTimeEqual/);
-  assert.match(callback, /readOAuthFlow/);
-  assert.match(callback, /grant_type=pkce/);
+  assert.match(source, /sessionSchema/);
+  assert.doesNotMatch(source, /OAuth|PKCE|cookieSecret/);
 });
 
 test("rate limits authentication without persisting raw client addresses", async () => {
@@ -263,14 +260,12 @@ test("email authentication rejects cross-site, malformed, and failed upstream re
   }
 });
 
-test("rejects replayed or tampered OAuth PKCE state before exchanging a code", async () => {
-  const { createOAuthFlow, readOAuthFlow } = await vite.ssrLoadModule("/lib/server/auth-session.ts");
-  const flow = await createOAuthFlow("/");
-  const read = await readOAuthFlow(flow.cookieValue, flow.state);
-  assert.equal(read.returnTo, "/");
-  assert.equal(read.verifier, flow.verifier);
-  await assert.rejects(() => readOAuthFlow(flow.cookieValue, `${flow.state}x`), { status: 400 });
-  await assert.rejects(() => readOAuthFlow(`${flow.cookieValue}x`, flow.state), { status: 400 });
+test("does not leave unused OAuth routes deployed", async () => {
+  const files = await Promise.all([
+    readFile(path.join(root, "app/api/auth/google/route.ts"), "utf8").then(() => true, () => false),
+    readFile(path.join(root, "app/api/auth/callback/route.ts"), "utf8").then(() => true, () => false),
+  ]);
+  assert.deepEqual(files, [false, false]);
 });
 
 test("handles a high-volume local ranking batch within a predictable budget", async () => {
